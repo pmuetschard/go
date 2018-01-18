@@ -727,7 +727,7 @@ func (f *peFile) writeSymbolTableAndStringTable(ctxt *Link) {
 
 // writeFileHeader writes COFF file header for peFile f.
 func (f *peFile) writeFileHeader(arch *sys.Arch, out *OutBuf, linkmode LinkMode) {
-	var fh pe.FileHeader
+	var fh pe.FileHeaderSmall
 
 	switch arch.Family {
 	default:

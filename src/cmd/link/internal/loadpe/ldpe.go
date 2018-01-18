@@ -225,17 +225,18 @@ func Load(arch *sys.Arch, syms *sym.Symbols, input *bio.Reader, pkg string, leng
 			if int(r.SymbolTableIndex) >= len(f.COFFSymbols) {
 				return nil, nil, fmt.Errorf("relocation number %d symbol index idx=%d cannot be large then number of symbols %d", j, r.SymbolTableIndex, len(f.COFFSymbols))
 			}
-			pesym := &f.COFFSymbols[r.SymbolTableIndex]
+			pesym := f.COFFSymbols[r.SymbolTableIndex]
 			gosym, err := readpesym(arch, syms, f, pesym, sectsyms, localSymVersion)
 			if err != nil {
 				return nil, nil, err
 			}
 			if gosym == nil {
-				name, err := pesym.FullName(f.StringTable)
+				name, err := pe.FullName(pesym, f.StringTable)
 				if err != nil {
-					name = string(pesym.Name[:])
+					n := pesym.GetName()
+					name = string(n[:])
 				}
-				return nil, nil, fmt.Errorf("reloc of invalid sym %s idx=%d type=%d", name, r.SymbolTableIndex, pesym.Type)
+				return nil, nil, fmt.Errorf("reloc of invalid sym %s idx=%d type=%d", name, r.SymbolTableIndex, pesym.GetType)
 			}
 
 			rp.Sym = gosym
@@ -271,7 +272,7 @@ func Load(arch *sys.Arch, syms *sym.Symbols, input *bio.Reader, pkg string, leng
 			// same section but with different values, we have to take
 			// that into account
 			if issect(pesym) {
-				rp.Add += int64(pesym.Value)
+				rp.Add += int64(pesym.GetValue())
 			}
 		}
 
@@ -284,11 +285,11 @@ func Load(arch *sys.Arch, syms *sym.Symbols, input *bio.Reader, pkg string, leng
 
 	// enter sub-symbols into symbol table.
 	for i, numaux := 0, 0; i < len(f.COFFSymbols); i += numaux + 1 {
-		pesym := &f.COFFSymbols[i]
+		pesym := f.COFFSymbols[i]
 
-		numaux = int(pesym.NumberOfAuxSymbols)
+		numaux = int(pesym.GetNumberOfAuxSymbols())
 
-		name, err := pesym.FullName(f.StringTable)
+		name, err := pe.FullName(pesym, f.StringTable)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -298,15 +299,15 @@ func Load(arch *sys.Arch, syms *sym.Symbols, input *bio.Reader, pkg string, leng
 		if issect(pesym) {
 			continue
 		}
-		if int(pesym.SectionNumber) > len(f.Sections) {
+		if int(pesym.GetSectionNumber()) > len(f.Sections) {
 			continue
 		}
-		if pesym.SectionNumber == IMAGE_SYM_DEBUG {
+		if pesym.GetSectionNumber() == IMAGE_SYM_DEBUG {
 			continue
 		}
 		var sect *pe.Section
-		if pesym.SectionNumber > 0 {
-			sect = f.Sections[pesym.SectionNumber-1]
+		if pesym.GetSectionNumber() > 0 {
+			sect = f.Sections[pesym.GetSectionNumber()-1]
 			if _, found := sectsyms[sect]; !found {
 				continue
 			}
@@ -317,18 +318,18 @@ func Load(arch *sys.Arch, syms *sym.Symbols, input *bio.Reader, pkg string, leng
 			return nil, nil, err
 		}
 
-		if pesym.SectionNumber == 0 { // extern
+		if pesym.GetSectionNumber() == 0 { // extern
 			if s.Type == sym.SDYNIMPORT {
 				s.Plt = -2 // flag for dynimport in PE object files.
 			}
-			if s.Type == sym.SXREF && pesym.Value > 0 { // global data
+			if s.Type == sym.SXREF && pesym.GetValue() > 0 { // global data
 				s.Type = sym.SNOPTRDATA
-				s.Size = int64(pesym.Value)
+				s.Size = int64(pesym.GetValue())
 			}
 
 			continue
-		} else if pesym.SectionNumber > 0 && int(pesym.SectionNumber) <= len(f.Sections) {
-			sect = f.Sections[pesym.SectionNumber-1]
+		} else if pesym.GetSectionNumber() > 0 && int(pesym.GetSectionNumber()) <= len(f.Sections) {
+			sect = f.Sections[pesym.GetSectionNumber()-1]
 			if _, found := sectsyms[sect]; !found {
 				return nil, nil, fmt.Errorf("%s: %v: missing sect.sym", pn, s)
 			}
@@ -352,7 +353,7 @@ func Load(arch *sys.Arch, syms *sym.Symbols, input *bio.Reader, pkg string, leng
 		sectsym.Sub = s
 		s.Type = sectsym.Type
 		s.Attr |= sym.AttrSubSymbol
-		s.Value = int64(pesym.Value)
+		s.Value = int64(pesym.GetValue())
 		s.Size = 4
 		s.Outer = sectsym
 		if sectsym.Type == sym.STEXT {
@@ -392,18 +393,18 @@ func Load(arch *sys.Arch, syms *sym.Symbols, input *bio.Reader, pkg string, leng
 	return textp, rsrc, nil
 }
 
-func issect(s *pe.COFFSymbol) bool {
-	return s.StorageClass == IMAGE_SYM_CLASS_STATIC && s.Type == 0 && s.Name[0] == '.'
+func issect(s pe.COFFSymbol) bool {
+	return s.GetStorageClass() == IMAGE_SYM_CLASS_STATIC && s.GetType() == 0 && s.GetName()[0] == '.'
 }
 
-func readpesym(arch *sys.Arch, syms *sym.Symbols, f *pe.File, pesym *pe.COFFSymbol, sectsyms map[*pe.Section]*sym.Symbol, localSymVersion int) (*sym.Symbol, error) {
-	symname, err := pesym.FullName(f.StringTable)
+func readpesym(arch *sys.Arch, syms *sym.Symbols, f *pe.File, pesym pe.COFFSymbol, sectsyms map[*pe.Section]*sym.Symbol, localSymVersion int) (*sym.Symbol, error) {
+	symname, err := pe.FullName(pesym, f.StringTable)
 	if err != nil {
 		return nil, err
 	}
 	var name string
 	if issect(pesym) {
-		name = sectsyms[f.Sections[pesym.SectionNumber-1]].Name
+		name = sectsyms[f.Sections[pesym.GetSectionNumber()-1]].Name
 	} else {
 		name = symname
 		if strings.HasPrefix(name, "__imp_") {
@@ -420,12 +421,12 @@ func readpesym(arch *sys.Arch, syms *sym.Symbols, f *pe.File, pesym *pe.COFFSymb
 	}
 
 	var s *sym.Symbol
-	switch pesym.Type {
+	switch pesym.GetType() {
 	default:
-		return nil, fmt.Errorf("%s: invalid symbol type %d", symname, pesym.Type)
+		return nil, fmt.Errorf("%s: invalid symbol type %d", symname, pesym.GetType())
 
 	case IMAGE_SYM_DTYPE_FUNCTION, IMAGE_SYM_DTYPE_NULL:
-		switch pesym.StorageClass {
+		switch pesym.GetStorageClass() {
 		case IMAGE_SYM_CLASS_EXTERNAL: //global
 			s = syms.Lookup(name, 0)
 
@@ -434,11 +435,11 @@ func readpesym(arch *sys.Arch, syms *sym.Symbols, f *pe.File, pesym *pe.COFFSymb
 			s.Attr |= sym.AttrDuplicateOK
 
 		default:
-			return nil, fmt.Errorf("%s: invalid symbol binding %d", symname, pesym.StorageClass)
+			return nil, fmt.Errorf("%s: invalid symbol binding %d", symname, pesym.GetStorageClass())
 		}
 	}
 
-	if s != nil && s.Type == 0 && (pesym.StorageClass != IMAGE_SYM_CLASS_STATIC || pesym.Value != 0) {
+	if s != nil && s.Type == 0 && (pesym.GetStorageClass() != IMAGE_SYM_CLASS_STATIC || pesym.GetValue() != 0) {
 		s.Type = sym.SXREF
 	}
 	if strings.HasPrefix(symname, "__imp_") {

@@ -1430,6 +1430,30 @@ func ldobj(ctxt *Link, f *bio.Reader, lib *sym.Library, length int64, pn string,
 		return ldhostobj(ldpe, ctxt.HeadType, f, pkg, length, pn, file)
 	}
 
+	if magic == 0xffff { // \0 \0 \xFF \xFF
+		f.Seek(start + 4, 0)
+		c1 = bgetc(f)
+		c2 = bgetc(f)
+		c3 = bgetc(f)
+		c4 = bgetc(f)
+		f.Seek(start, 0)
+
+		if c1 == 0x02 && c2 == 0x00 && c3 == 0x64 && c4 == 0x86 {
+			ldpe := func(ctxt *Link, f *bio.Reader, pkg string, length int64, pn string) {
+				textp, rsrc, err := loadpe.Load(ctxt.Arch, ctxt.Syms, f, pkg, length, pn)
+				if err != nil {
+					Errorf(nil, "%v", err)
+					return
+				}
+				if rsrc != nil {
+					setpersrc(ctxt, rsrc)
+				}
+				ctxt.Textp = append(ctxt.Textp, textp...)
+			}
+			return  ldhostobj(ldpe, ctxt.HeadType, f, pkg, length, pn, file)
+		}
+	}
+
 	/* check the header */
 	line, err := f.ReadString('\n')
 	if err != nil {

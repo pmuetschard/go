@@ -10,10 +10,20 @@ import (
 	"io"
 )
 
-const COFFSymbolSize = 18
+const COFFSmallSymbolSize = 18
+const COFFBigSymbolSize = 20
 
 // COFFSymbol represents single COFF symbol table record.
-type COFFSymbol struct {
+type COFFSymbol interface {
+	GetName() [8]uint8
+	GetValue() uint32
+	GetSectionNumber() int
+	GetType() uint16
+	GetStorageClass() uint8
+	GetNumberOfAuxSymbols() uint8
+}
+
+type COFFSmallSymbol struct {
 	Name               [8]uint8
 	Value              uint32
 	SectionNumber      int16
@@ -22,19 +32,51 @@ type COFFSymbol struct {
 	NumberOfAuxSymbols uint8
 }
 
-func readCOFFSymbols(fh *FileHeader, r io.ReadSeeker) ([]COFFSymbol, error) {
-	if fh.PointerToSymbolTable == 0 {
+type COFFBigSymbol struct {
+	Name               [8]uint8
+	Value              uint32
+	SectionNumber      int32
+	Type               uint16
+	StorageClass       uint8
+	NumberOfAuxSymbols uint8
+}
+
+
+func readCOFFSymbols(fh FileHeader, r io.ReadSeeker) ([]COFFSymbol, error) {
+	if fh.GetPointerToSymbolTable() == 0 {
 		return nil, nil
 	}
-	if fh.NumberOfSymbols <= 0 {
+	if fh.GetNumberOfSymbols() <= 0 {
 		return nil, nil
 	}
-	_, err := r.Seek(int64(fh.PointerToSymbolTable), seekStart)
+	_, err := r.Seek(int64(fh.GetPointerToSymbolTable()), seekStart)
 	if err != nil {
 		return nil, fmt.Errorf("fail to seek to symbol table: %v", err)
 	}
-	syms := make([]COFFSymbol, fh.NumberOfSymbols)
-	err = binary.Read(r, binary.LittleEndian, syms)
+
+	syms := make([]COFFSymbol, fh.GetNumberOfSymbols())
+
+	switch fh.GetSymbolSize() {
+	case COFFSmallSymbolSize:
+		ss := make([]COFFSmallSymbol, len(syms))
+		err = binary.Read(r, binary.LittleEndian, ss)
+		if err == nil {
+			for i := range ss {
+				syms[i] = &ss[i]
+			}
+		}
+	case COFFBigSymbolSize:
+		sb := make([]COFFBigSymbol, len(syms))
+		err = binary.Read(r, binary.LittleEndian, sb)
+		if err == nil {
+			for i := range sb {
+				syms[i] = &sb[i]
+			}
+		}
+	default:
+		err = fmt.Errorf("unknown symbol size: %v", fh.GetSymbolSize())
+	}
+
 	if err != nil {
 		return nil, fmt.Errorf("fail to read symbol table: %v", err)
 	}
@@ -52,11 +94,12 @@ func isSymNameOffset(name [8]byte) (bool, uint32) {
 // FullName finds real name of symbol sym. Normally name is stored
 // in sym.Name, but if it is longer then 8 characters, it is stored
 // in COFF string table st instead.
-func (sym *COFFSymbol) FullName(st StringTable) (string, error) {
-	if ok, offset := isSymNameOffset(sym.Name); ok {
+func FullName(sym COFFSymbol, st StringTable) (string, error) {
+	name := sym.GetName()
+	if ok, offset := isSymNameOffset(name); ok {
 		return st.String(offset)
 	}
-	return cstring(sym.Name[:]), nil
+	return cstring(name[:]), nil
 }
 
 func removeAuxSymbols(allsyms []COFFSymbol, st StringTable) ([]*Symbol, error) {
@@ -70,17 +113,17 @@ func removeAuxSymbols(allsyms []COFFSymbol, st StringTable) ([]*Symbol, error) {
 			aux--
 			continue
 		}
-		name, err := sym.FullName(st)
+		name, err := FullName(sym, st)
 		if err != nil {
 			return nil, err
 		}
-		aux = sym.NumberOfAuxSymbols
+		aux = sym.GetNumberOfAuxSymbols()
 		s := &Symbol{
 			Name:          name,
-			Value:         sym.Value,
-			SectionNumber: sym.SectionNumber,
-			Type:          sym.Type,
-			StorageClass:  sym.StorageClass,
+			Value:         sym.GetValue(),
+			SectionNumber: sym.GetSectionNumber(),
+			Type:          sym.GetType(),
+			StorageClass:  sym.GetStorageClass(),
 		}
 		syms = append(syms, s)
 	}
@@ -92,7 +135,57 @@ func removeAuxSymbols(allsyms []COFFSymbol, st StringTable) ([]*Symbol, error) {
 type Symbol struct {
 	Name          string
 	Value         uint32
-	SectionNumber int16
+	SectionNumber int
 	Type          uint16
 	StorageClass  uint8
+}
+
+
+func (s *COFFSmallSymbol) GetName() [8]uint8 {
+	return s.Name
+}
+
+func (s *COFFSmallSymbol) GetValue() uint32 {
+	return s.Value
+}
+
+func (s *COFFSmallSymbol) GetSectionNumber() int {
+	return int(s.SectionNumber)
+}
+
+func (s *COFFSmallSymbol) GetType() uint16 {
+	return s.Type
+}
+
+func (s *COFFSmallSymbol) GetStorageClass() uint8 {
+	return s.StorageClass
+}
+
+func (s *COFFSmallSymbol) GetNumberOfAuxSymbols() uint8 {
+	return s.NumberOfAuxSymbols
+}
+
+
+func (s *COFFBigSymbol) GetName() [8]uint8 {
+	return s.Name
+}
+
+func (s *COFFBigSymbol) GetValue() uint32 {
+	return s.Value
+}
+
+func (s *COFFBigSymbol) GetSectionNumber() int {
+	return int(s.SectionNumber)
+}
+
+func (s *COFFBigSymbol) GetType() uint16 {
+	return s.Type
+}
+
+func (s *COFFBigSymbol) GetStorageClass() uint8 {
+	return s.StorageClass
+}
+
+func (s *COFFBigSymbol) GetNumberOfAuxSymbols() uint8 {
+	return s.NumberOfAuxSymbols
 }

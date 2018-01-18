@@ -56,8 +56,8 @@ func (f *File) Close() error {
 }
 
 var (
-	sizeofOptionalHeader32 = uint16(binary.Size(OptionalHeader32{}))
-	sizeofOptionalHeader64 = uint16(binary.Size(OptionalHeader64{}))
+	sizeofOptionalHeader32 = binary.Size(OptionalHeader32{})
+	sizeofOptionalHeader64 = binary.Size(OptionalHeader64{})
 )
 
 // TODO(brainman): add Load function, as a replacement for NewFile, that does not call removeAuxSymbols (for performance)
@@ -84,25 +84,39 @@ func NewFile(r io.ReaderAt) (*File, error) {
 		base = int64(0)
 	}
 	sr.Seek(base, seekStart)
-	if err := binary.Read(sr, binary.LittleEndian, &f.FileHeader); err != nil {
+
+	var fhS FileHeaderSmall
+	var fhB FileHeaderBig
+	if err := binary.Read(sr, binary.LittleEndian, &fhS); err != nil {
 		return nil, err
 	}
-	switch f.FileHeader.Machine {
+
+	if fhS.Machine == IMAGE_FILE_MACHINE_UNKNOWN && fhS.NumberOfSections == IMAGE_SYM_SECTION_ANON {
+		sr.Seek(base, seekStart)
+		if err := binary.Read(sr, binary.LittleEndian, &fhB); err != nil {
+			return nil, err
+		}
+		f.FileHeader = &fhB
+	} else {
+		f.FileHeader = &fhS
+	}
+
+	switch f.FileHeader.GetMachine() {
 	case IMAGE_FILE_MACHINE_UNKNOWN, IMAGE_FILE_MACHINE_AMD64, IMAGE_FILE_MACHINE_I386:
 	default:
-		return nil, fmt.Errorf("Unrecognised COFF file header machine value of 0x%x.", f.FileHeader.Machine)
+		return nil, fmt.Errorf("Unrecognised COFF file header machine value of 0x%x.", f.FileHeader.GetMachine())
 	}
 
 	var err error
 
 	// Read string table.
-	f.StringTable, err = readStringTable(&f.FileHeader, sr)
+	f.StringTable, err = readStringTable(f.FileHeader, sr)
 	if err != nil {
 		return nil, err
 	}
 
 	// Read symbol table.
-	f.COFFSymbols, err = readCOFFSymbols(&f.FileHeader, sr)
+	f.COFFSymbols, err = readCOFFSymbols(f.FileHeader, sr)
 	if err != nil {
 		return nil, err
 	}
@@ -113,12 +127,12 @@ func NewFile(r io.ReaderAt) (*File, error) {
 
 	// Read optional header.
 	sr.Seek(base, seekStart)
-	if err := binary.Read(sr, binary.LittleEndian, &f.FileHeader); err != nil {
+	if err := binary.Read(sr, binary.LittleEndian, f.FileHeader); err != nil {
 		return nil, err
 	}
 	var oh32 OptionalHeader32
 	var oh64 OptionalHeader64
-	switch f.FileHeader.SizeOfOptionalHeader {
+	switch f.FileHeader.GetSizeOfOptionalHeader() {
 	case sizeofOptionalHeader32:
 		if err := binary.Read(sr, binary.LittleEndian, &oh32); err != nil {
 			return nil, err
@@ -138,8 +152,8 @@ func NewFile(r io.ReaderAt) (*File, error) {
 	}
 
 	// Process sections.
-	f.Sections = make([]*Section, f.FileHeader.NumberOfSections)
-	for i := 0; i < int(f.FileHeader.NumberOfSections); i++ {
+	f.Sections = make([]*Section, f.FileHeader.GetNumberOfSections())
+	for i := 0; i < f.FileHeader.GetNumberOfSections(); i++ {
 		sh := new(SectionHeader32)
 		if err := binary.Read(sr, binary.LittleEndian, sh); err != nil {
 			return nil, err
@@ -259,7 +273,7 @@ type ImportDirectory struct {
 // satisfied by other libraries at dynamic load time.
 // It does not return weak symbols.
 func (f *File) ImportedSymbols() ([]string, error) {
-	pe64 := f.Machine == IMAGE_FILE_MACHINE_AMD64
+	pe64 := f.GetMachine() == IMAGE_FILE_MACHINE_AMD64
 	ds := f.Section(".idata")
 	if ds == nil {
 		// not dynamic, so no libraries

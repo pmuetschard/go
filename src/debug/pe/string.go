@@ -22,12 +22,12 @@ func cstring(b []byte) string {
 // StringTable is a COFF string table.
 type StringTable []byte
 
-func readStringTable(fh *FileHeader, r io.ReadSeeker) (StringTable, error) {
+func readStringTable(fh FileHeader, r io.ReadSeeker) (StringTable, error) {
 	// COFF string table is located right after COFF symbol table.
-	if fh.PointerToSymbolTable <= 0 {
+	if fh.GetPointerToSymbolTable() <= 0 {
 		return nil, nil
 	}
-	offset := fh.PointerToSymbolTable + COFFSymbolSize*fh.NumberOfSymbols
+	offset := fh.GetPointerToSymbolTable() + fh.GetSymbolSize()*fh.GetNumberOfSymbols()
 	_, err := r.Seek(int64(offset), seekStart)
 	if err != nil {
 		return nil, fmt.Errorf("fail to seek to string table: %v", err)

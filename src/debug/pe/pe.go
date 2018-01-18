@@ -4,7 +4,16 @@
 
 package pe
 
-type FileHeader struct {
+type FileHeader interface {
+	GetMachine() uint16
+	GetNumberOfSections() int
+	GetPointerToSymbolTable() uint32
+	GetNumberOfSymbols() uint32
+	GetSizeOfOptionalHeader() int
+	GetSymbolSize() uint32
+}
+
+type FileHeaderSmall struct {
 	Machine              uint16
 	NumberOfSections     uint16
 	TimeDateStamp        uint32
@@ -12,6 +21,21 @@ type FileHeader struct {
 	NumberOfSymbols      uint32
 	SizeOfOptionalHeader uint16
 	Characteristics      uint16
+}
+
+type FileHeaderBig struct {
+	Signature            uint32
+	Version              uint16
+	Machine              uint16
+	TimeDateStamp        uint32
+	ClassId              [16]uint8
+	SizeOfData           uint32
+	Flags                uint32
+	MetaDataSize         uint32
+	MetaDataOffset       uint32
+	NumberOfSections     uint32
+	PointerToSymbolTable uint32
+	NumberOfSymbols      uint32
 }
 
 type DataDirectory struct {
@@ -107,4 +131,56 @@ const (
 	IMAGE_FILE_MACHINE_SH5       = 0x1a8
 	IMAGE_FILE_MACHINE_THUMB     = 0x1c2
 	IMAGE_FILE_MACHINE_WCEMIPSV2 = 0x169
+
+	IMAGE_SYM_SECTION_ANON       = 0xFFFF
 )
+
+
+func (fh *FileHeaderSmall) GetMachine() uint16 {
+	return fh.Machine
+}
+
+func (fh *FileHeaderSmall) GetNumberOfSections() int {
+	return int(fh.NumberOfSections)
+}
+
+func (fh *FileHeaderSmall) GetPointerToSymbolTable() uint32 {
+	return fh.PointerToSymbolTable
+}
+
+func (fh *FileHeaderSmall) GetNumberOfSymbols() uint32 {
+	return fh.NumberOfSymbols
+}
+
+func (fh *FileHeaderSmall) GetSizeOfOptionalHeader() int {
+	return int(fh.SizeOfOptionalHeader)
+}
+
+func (fh *FileHeaderSmall) GetSymbolSize() uint32 {
+	return COFFSmallSymbolSize
+}
+
+
+func (fh *FileHeaderBig) GetMachine() uint16 {
+	return fh.Machine
+}
+
+func (fh *FileHeaderBig) GetNumberOfSections() int {
+	return int(fh.NumberOfSections)
+}
+
+func (fh *FileHeaderBig) GetPointerToSymbolTable() uint32 {
+	return fh.PointerToSymbolTable
+}
+
+func (fh *FileHeaderBig) GetNumberOfSymbols() uint32 {
+	return fh.NumberOfSymbols
+}
+
+func (fh *FileHeaderBig) GetSizeOfOptionalHeader() int {
+	return 0
+}
+
+func (fh *FileHeaderBig) GetSymbolSize() uint32 {
+	return COFFBigSymbolSize
+}
