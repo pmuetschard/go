@@ -61,6 +61,9 @@ func MatchPackages(pattern string) []string {
 		if (pattern == "std" || pattern == "cmd") && src != cfg.GOROOTsrc {
 			continue
 		}
+		if s, err := filepath.EvalSymlinks(src); err == nil {
+			src = s
+		}
 		src = filepath.Clean(src) + string(filepath.Separator)
 		root := src
 		if pattern == "cmd" {
